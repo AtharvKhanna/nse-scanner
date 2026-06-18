@@ -13,7 +13,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from scanner import config, scan, longterm, swing
+from scanner import config, scan, longterm, swing, paper
 
 st.set_page_config(page_title="NSE Stock Scanner", page_icon="📈", layout="wide")
 
@@ -544,11 +544,80 @@ def render_swing(scope, with_news, news_limit, stamp, min_upside, min_score, onl
 
 
 # ==========================================================================
+# PAPER TRADING VIEW (virtual money, auto-exit on SL/TP)
+# ==========================================================================
+def render_paper(scope, with_news, news_limit, stamp):
+    st.title("🧪 Paper Trading — virtual money, auto-exit on stop-loss / target")
+    state = paper.load_state()
+
+    if state is None:
+        st.info("Not started yet. This **simulates** buying the top swing pick(s) with "
+                "virtual money and automatically 'selling' when the stop-loss or target "
+                "is hit — so you can see how the strategy performs with **zero real risk**.")
+        c = st.columns(2)
+        cap = c[0].number_input("Starting capital (₹)", 1000, 1_000_000,
+                                config.PAPER_CAPITAL, step=1000)
+        pos = c[1].number_input("Stocks held at once", 1, 5, config.PAPER_POSITIONS)
+        if st.button("▶️ Start paper trading", type="primary"):
+            res = cached_swing(scope, with_news, news_limit, stamp)
+            s = paper.init_state(cap, pos)
+            paper.update(s, res["df"])
+            st.rerun()
+        return
+
+    top = st.columns([1, 1, 2])
+    if top[0].button("🔄 Update (exits + new buys)", use_container_width=True):
+        res = cached_swing(scope, with_news, news_limit, stamp)
+        paper.update(state, res["df"])
+        st.rerun()
+    if top[1].button("🗑️ Reset", use_container_width=True):
+        paper.reset()
+        st.rerun()
+
+    sm = paper.summary(state)
+    m = st.columns(4)
+    m[0].metric("Portfolio value", f"₹{sm['total_value']:,.0f}", f"{sm['total_return_pct']:+.1f}%")
+    m[1].metric("Cash", f"₹{sm['cash']:,.0f}")
+    m[2].metric("Realised P&L", f"₹{sm['realised']:+,.0f}")
+    m[3].metric("Win rate", f"{sm['win_rate']:.0f}%" if sm["win_rate"] is not None else "—",
+                f"{sm['trades']} trades")
+    st.caption(f"Started {sm['start_date']} · virtual ₹{state['capital']:,.0f} · holds "
+               f"{state['max_positions']} at a time · auto-exits when a day's High ≥ target "
+               "or Low ≤ stop. Click 🔄 Update daily (after 3:50 PM) to process exits and new buys.")
+
+    st.subheader("📌 Open positions")
+    if state["positions"]:
+        rows = []
+        for p in state["positions"]:
+            last = p.get("last", p["entry"])
+            pnl = (last - p["entry"]) * p["qty"]
+            rows.append({"Stock": p["symbol"], "Qty": p["qty"], "Entry ₹": p["entry"],
+                         "Now ₹": last, "Stop": p["stop"], "Target": p["target"],
+                         "P&L ₹": round(pnl), "Since": p["entry_date"]})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    else:
+        st.caption("No open positions right now.")
+
+    st.subheader("✅ Closed trades")
+    if state["closed"]:
+        rows = [{"Stock": c["symbol"], "Qty": c["qty"], "Entry ₹": c["entry"],
+                 "Exit ₹": c["exit"], "Reason": c["reason"], "P&L ₹": c["pnl"],
+                 "Bought": c["entry_date"], "Sold": c["exit_date"]}
+                for c in reversed(state["closed"])]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    else:
+        st.caption("No closed trades yet — positions close automatically when SL/TP triggers.")
+
+    st.caption("⚠️ Virtual money only — places **no real orders**. State persists when run "
+               "locally; on the cloud it may reset when the app restarts.")
+
+
+# ==========================================================================
 # Sidebar + routing
 # ==========================================================================
 st.sidebar.title("📈 NSE Scanner")
-mode = st.sidebar.radio("Mode", ["Swing (15d – 2 months)", "Long-Term Investing",
-                                 "Intraday Momentum"])
+mode = st.sidebar.radio("Mode", ["Swing (15d – 2 months)", "🧪 Paper Trading",
+                                 "Long-Term Investing", "Intraday Momentum"])
 scope = st.sidebar.radio("Universe", ["nifty500", "all"],
                          format_func=lambda s: "Nifty 500" if s == "nifty500" else "All (~2,300)")
 with_news = st.sidebar.toggle("Apply News factor", value=True)
@@ -582,6 +651,10 @@ elif mode == "Swing (15d – 2 months)":
                        "volume + RSI) with ATR-based targets/stops. Holding ≈ 2–10 weeks.")
     render_swing(scope, with_news, news_limit, stamp,
                  sw_min_upside, sw_min_score, sw_only_buy)
+elif mode == "🧪 Paper Trading":
+    st.sidebar.caption("Virtual portfolio driven by the Swing signals. Buys the top "
+                       "pick(s), auto-sells on stop-loss/target, tracks P&L. No real money.")
+    render_paper(scope, with_news, news_limit, stamp)
 else:
     st.sidebar.markdown("**Filters**")
     real_vwap = st.sidebar.toggle("Real intraday VWAP (shortlist)", value=True)

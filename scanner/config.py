@@ -137,6 +137,11 @@ SWING_HISTORY_DAYS = 200      # ~9 months daily bars (3-mo return + 50-EMA + str
 SWING_BUY = 60
 SWING_WATCH = 45              # 45-59 -> WATCH (near setup), <45 -> AVOID
 
+# Paper trading (virtual portfolio)
+PAPER_CAPITAL = 10000
+PAPER_POSITIONS = 1          # how many stocks held at once (default: all-in 1)
+PAPER_MAX_PRICE = 5000       # skip names too pricey to buy even 1 share sensibly
+
 # --------------------------------------------------------------------------
 # Data fetch
 # --------------------------------------------------------------------------

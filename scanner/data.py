@@ -49,9 +49,15 @@ def fetch_daily(tickers: List[str], days: int = config.HISTORY_DAYS,
             time.sleep(1.5 * (attempt + 1))
         if df is None or len(df) == 0:
             continue
+        multi = isinstance(df.columns, pd.MultiIndex)
         for t in batch:
             try:
-                sub = df[t] if len(batch) > 1 else df
+                if multi:
+                    if t not in df.columns.get_level_values(0):
+                        continue
+                    sub = df[t]            # works for single- and multi-ticker batches
+                else:
+                    sub = df
                 sub = sub.dropna(how="all")
                 if len(sub) >= 20 and sub["Close"].notna().any():
                     out[t] = sub

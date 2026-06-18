@@ -7,9 +7,11 @@ venv/
 
 # Runtime cache (regenerated daily) and logs
 data/cache/
+data/paper_state.json
 *.pkl
 *.log
 streamlit*.log
+warmup.png
 
 # Streamlit secrets (none used, but never commit)
 .streamlit/secrets.toml
