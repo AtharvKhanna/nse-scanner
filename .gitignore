@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime cache (regenerated daily) and logs
+data/cache/
+*.pkl
+*.log
+streamlit*.log
+
+# Streamlit secrets (none used, but never commit)
+.streamlit/secrets.toml
+
+# OS
+Thumbs.db
+.DS_Store
