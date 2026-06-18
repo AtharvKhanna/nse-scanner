@@ -17,6 +17,19 @@ from scanner import config, scan, longterm, swing
 
 st.set_page_config(page_title="NSE Stock Scanner", page_icon="📈", layout="wide")
 
+IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
+
+
+def _ist_now_str():
+    """Current time in IST (cloud servers run in UTC) — used for the data stamp."""
+    return dt.datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
+
+
+def _updated_caption(res):
+    when = res.get("fetched_at", "—")
+    st.caption(f"🕒 **Last updated:** {when}  ·  data refreshes once per day  ·  "
+               "click **🔄 Refresh data** in the sidebar for a fresh pull now.")
+
 SIGNAL_COLORS = {"STRONG BUY": "#16c784", "WATCH": "#f3b13e", "AVOID": "#7a7f8c"}
 REC_COLORS = {"STRONG BUY": "#16c784", "BUY": "#1fb86e", "ACCUMULATE": "#f3b13e",
               "HOLD": "#9aa0ac", "AVOID": "#ea3943"}
@@ -42,6 +55,7 @@ def cached_intraday(scope, with_news, real_vwap, news_limit, _stamp):
     res = scan.run_scan(scope=scope, with_news=with_news, real_vwap_shortlist=real_vwap,
                         news_limit=news_limit,
                         progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
+    res["fetched_at"] = _ist_now_str()
     bar.empty()
     return res
 
@@ -51,6 +65,7 @@ def cached_longterm(scope, with_news, news_limit, _stamp):
     bar = st.progress(0.0, text="Starting…")
     res = longterm.run_longterm_scan(scope=scope, with_news=with_news, news_limit=news_limit,
                                      progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
+    res["fetched_at"] = _ist_now_str()
     bar.empty()
     return res
 
@@ -60,6 +75,7 @@ def cached_swing(scope, with_news, news_limit, _stamp):
     bar = st.progress(0.0, text="Starting…")
     res = swing.run_swing_scan(scope=scope, with_news=with_news, news_limit=news_limit,
                                progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
+    res["fetched_at"] = _ist_now_str()
     bar.empty()
     return res
 
@@ -135,9 +151,9 @@ def render_longterm(scope, with_news, news_limit, stamp,
     c3.metric("Stocks shown", len(d))
     avg_up = pd.to_numeric(buy["upside_pct"], errors="coerce").mean() if len(buy) else 0
     c4.metric("Avg upside (buys)", f"{avg_up:+.1f}%")
+    _updated_caption(res)
     st.caption("Targets = analyst consensus (sanity-checked); time-to-target & stop-loss are "
-               "model estimates. Refreshed " + stamp[:16].replace("T", " ") +
-               ". Screening tool, not investment advice.")
+               "model estimates. Screening tool, not investment advice.")
 
     t1, t2, t3, t4 = st.tabs(["🟢 Buy Now", "🟡 Accumulate / Watch",
                               "📊 All Stocks", "🔎 Stock Detail"])
@@ -313,6 +329,7 @@ def render_intraday(scope, with_news, real_vwap, news_limit, stamp,
     c2.metric("Strong Buy", len(watchlist))
     c3.metric("Watch Tomorrow", len(watch_tom))
     c4.metric("Scanned", len(df))
+    _updated_caption(res)
 
     t1, t2, t3, t4 = st.tabs(["🔥 Watchlist", "👀 Watch Tomorrow", "📊 Full Data", "🔎 Detail"])
     with t1:
@@ -420,8 +437,9 @@ def render_swing(scope, with_news, news_limit, stamp, min_upside, min_score, onl
     c2.metric("🟡 Watch (near setup)", len(watch))
     c3.metric("Stocks shown", len(d))
     c4.metric("Nifty 3-mo", f"{res['nifty_ret_3m']:+.1f}%")
+    _updated_caption(res)
     st.caption("Targets & stops are ATR-based; holding window ≈ 2–10 weeks. "
-               "Refreshed " + stamp[:16].replace("T", " ") + ". Not investment advice.")
+               "Screening tool — not investment advice.")
 
     t1, t2, t3, t4 = st.tabs(["🟢 Buy Now", "🟡 Watch", "📊 All Stocks", "🔎 Stock Detail"])
     with t1:
