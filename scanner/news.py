@@ -33,16 +33,45 @@ _ANALYZER.lexicon.update(_FINANCE_LEXICON)
 _GNEWS = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 # Critical negative events that should VETO a Buy regardless of technical score.
-# Matched as whole words (case-insensitive) in recent headlines.
+# Matched as whole words / phrases (case-insensitive) in recent headlines.
 RED_FLAG_TERMS = [
-    "loss", "losses", "net loss", "fraud", "fraudulent", "scam", "scandal",
-    "probe", "investigation", "raid", "sebi", "cbi", "ed ", "enforcement directorate",
-    "default", "defaults", "insolvency", "bankrupt", "bankruptcy", "ibc",
-    "downgrade", "downgraded", "penalty", "fined", "fine", "lawsuit", "sued",
-    "resign", "resigns", "resigned", "steps down", "money laundering",
-    "embezzle", "arrest", "arrested", "halt", "ban", "banned", "writeoff",
-    "write-off", "write off", "crash", "plunge", "tanks", "slump", "fire",
-    "recall", "delisting", "delisted", "auditor", "qualified opinion",
+    # --- financial distress / weak results ---
+    "loss", "losses", "net loss", "widening loss", "profit falls", "profit drops",
+    "profit declines", "profit slumps", "profit plunges", "profit warning",
+    "profit dips", "weak results", "disappointing", "misses estimates",
+    "miss estimates", "earnings miss", "revenue falls", "revenue declines",
+    "margin pressure", "shortfall", "guidance cut", "cuts guidance",
+    "lowers guidance", "slashes guidance",
+    # --- analyst / rating actions ---
+    "downgrade", "downgraded", "downgrades", "cut to sell", "sell rating",
+    "target cut", "price target cut", "rating cut", "underperform",
+    # --- legal / regulatory ---
+    "fraud", "fraudulent", "scam", "scandal", "ponzi", "probe", "investigation",
+    "investigated", "raid", "raided", "searches", "sebi", "cbi", "ed",
+    "enforcement directorate", "income tax", "gst notice", "tax notice",
+    "show cause", "show-cause", "summons", "penalty", "penalised", "fined",
+    "fine", "lawsuit", "sued", "litigation", "contempt", "insider trading",
+    "money laundering", "embezzle", "embezzlement", "whistleblower",
+    "regulatory action", "violation", "norms breach",
+    # --- solvency / debt ---
+    "default", "defaults", "defaulted", "insolvency", "bankrupt", "bankruptcy",
+    "ibc", "nclt", "winding up", "liquidation", "moratorium", "npa",
+    "bad loans", "debt restructuring", "credit rating cut", "rating downgrade",
+    # --- governance / management ---
+    "resign", "resigns", "resigned", "steps down", "quits", "sacked", "ousted",
+    "removed", "arrest", "arrested", "auditor resigns", "qualified opinion",
+    "promoter pledge", "pledged shares", "share pledge", "stake sale",
+    "promoter exit", "governance concerns",
+    # --- operational disasters ---
+    "halt", "suspension", "suspended", "ban", "banned", "recall", "delisting",
+    "delisted", "strike", "lockout", "layoffs", "layoff", "job cuts", "shutdown",
+    "plant shut", "accident", "blast", "explosion", "fire", "deaths",
+    "casualties", "contamination", "data breach", "hack", "cyberattack",
+    "ransomware", "import ban", "export ban", "boycott",
+    # --- severe price action ---
+    "crash", "crashes", "plunge", "plunges", "tanks", "slump", "slumps",
+    "tumble", "tumbles", "nosedive", "freefall", "sinks", "writeoff",
+    "write-off", "write off",
 ]
 
 
