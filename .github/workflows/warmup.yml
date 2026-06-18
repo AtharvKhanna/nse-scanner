@@ -1,0 +1,28 @@
+name: Warm up scanner (preload data after close)
+
+# Opens the deployed app at ~3:50 PM IST so the day's end-of-day data is fetched
+# and cached BEFORE you open it — no 60-second wait. GitHub schedules are in UTC
+# and can run a few minutes late, which is fine (3:50 PM IST is post-close).
+on:
+  schedule:
+    - cron: "20 10 * * 1-5"   # 10:20 UTC = 15:50 IST, Mon–Fri
+    - cron: "50 10 * * 1-5"   # 10:50 UTC = 16:20 IST, backup if the first run lags
+  workflow_dispatch: {}        # lets you run it manually from the Actions tab
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Warm up the app
+        env:
+          APP_URL: "https://nsescanner123.streamlit.app/"
+        run: python warmup.py
