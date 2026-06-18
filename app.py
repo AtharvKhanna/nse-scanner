@@ -25,10 +25,19 @@ def _ist_now_str():
     return dt.datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
 
 
+def data_epoch():
+    """Cache key that rolls over at 3:50 PM IST (post-close). Opening the app after
+    3:50 PM shows that day's end-of-day data; before then, the prior post-close snapshot."""
+    now = dt.datetime.now(IST)
+    cutoff = now.replace(hour=15, minute=50, second=0, microsecond=0)
+    day = now if now >= cutoff else now - dt.timedelta(days=1)
+    return day.strftime("%Y-%m-%d") + "-postclose"
+
+
 def _updated_caption(res):
     when = res.get("fetched_at", "—")
-    st.caption(f"🕒 **Last updated:** {when}  ·  data refreshes once per day  ·  "
-               "click **🔄 Refresh data** in the sidebar for a fresh pull now.")
+    st.caption(f"🕒 **Last updated:** {when}  ·  auto-updates after market close "
+               "(3:50 PM IST)  ·  click **🔄 Refresh data** in the sidebar for a fresh pull now.")
 
 SIGNAL_COLORS = {"STRONG BUY": "#16c784", "WATCH": "#f3b13e", "AVOID": "#7a7f8c"}
 REC_COLORS = {"STRONG BUY": "#16c784", "BUY": "#1fb86e", "ACCUMULATE": "#f3b13e",
@@ -549,8 +558,8 @@ if st.sidebar.button("🔄 Refresh data", use_container_width=True):
     cached_intraday.clear()
     cached_longterm.clear()
     cached_swing.clear()
-    st.session_state["stamp"] = dt.datetime.now().isoformat()
-stamp = st.session_state.get("stamp", dt.date.today().isoformat())
+# Cache key rolls over at 3:50 PM IST → first open after close fetches end-of-day data.
+stamp = data_epoch()
 
 st.sidebar.markdown("---")
 if mode == "Long-Term Investing":
