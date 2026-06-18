@@ -26,3 +26,10 @@ jobs:
         env:
           APP_URL: "https://nsescanner123.streamlit.app/"
         run: python warmup.py
+      - name: Upload screenshot (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warmup-screenshot
+          path: warmup.png
+          if-no-files-found: ignore

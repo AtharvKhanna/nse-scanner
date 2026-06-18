@@ -47,9 +47,17 @@ def _try_wake(page):
 def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
+        page = browser.new_page(
+            viewport={"width": 1366, "height": 900},
+            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+        )
         print(f"Opening {URL}")
         page.goto(URL, timeout=120000, wait_until="domcontentloaded")
+        try:
+            page.wait_for_selector('[data-testid="stApp"]', timeout=60000)
+        except Exception as e:
+            print("stApp not found:", e)
         page.wait_for_timeout(8000)
 
         # Wake the app if needed (retry a couple of times).
@@ -72,10 +80,14 @@ def main():
 
         page.wait_for_timeout(6000)  # let the server finish writing its cache
         print(f"Data loaded: {loaded}")
-        if not loaded:
-            print("PAGE TITLE:", page.title())
-            print("VISIBLE TEXT (first 800 chars):")
-            print(_visible_text(page)[:800])
+        print("PAGE TITLE:", page.title())
+        print("VISIBLE TEXT (first 800 chars):")
+        print(_visible_text(page)[:800])
+        try:
+            page.screenshot(path="warmup.png", full_page=True)
+            print("Saved screenshot warmup.png")
+        except Exception as e:
+            print("screenshot failed:", e)
         browser.close()
 
 
