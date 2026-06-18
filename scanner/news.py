@@ -32,6 +32,39 @@ _ANALYZER.lexicon.update(_FINANCE_LEXICON)
 
 _GNEWS = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
+# Critical negative events that should VETO a Buy regardless of technical score.
+# Matched as whole words (case-insensitive) in recent headlines.
+RED_FLAG_TERMS = [
+    "loss", "losses", "net loss", "fraud", "fraudulent", "scam", "scandal",
+    "probe", "investigation", "raid", "sebi", "cbi", "ed ", "enforcement directorate",
+    "default", "defaults", "insolvency", "bankrupt", "bankruptcy", "ibc",
+    "downgrade", "downgraded", "penalty", "fined", "fine", "lawsuit", "sued",
+    "resign", "resigns", "resigned", "steps down", "money laundering",
+    "embezzle", "arrest", "arrested", "halt", "ban", "banned", "writeoff",
+    "write-off", "write off", "crash", "plunge", "tanks", "slump", "fire",
+    "recall", "delisting", "delisted", "auditor", "qualified opinion",
+]
+
+
+def _red_flags(headlines: List[dict]):
+    """Return (red_flag, matched_terms, worst_sentiment) over RECENT headlines."""
+    import re
+
+    matched = set()
+    worst = 0.0
+    for h in headlines:
+        if h.get("age_days", 0) > config.NEWS_RECENCY_DAYS:
+            continue
+        worst = min(worst, h.get("sent", 0.0))
+        title = h.get("title", "").lower()
+        for term in RED_FLAG_TERMS:
+            # whole-word / phrase match (word boundaries around the term)
+            if re.search(r"(?<![a-z])" + re.escape(term.strip()) + r"(?![a-z])", title):
+                matched.add(term.strip())
+    # red flag if a critical term appears, or a single recent headline is very negative
+    red_flag = bool(matched) or worst <= -0.6
+    return red_flag, sorted(matched), round(worst, 2)
+
 
 def _clean_company(name: str) -> str:
     for suffix in [" Limited", " Ltd.", " Ltd", " Corporation", " Corp.", " Company"]:
@@ -79,11 +112,15 @@ def fetch_news(symbol: str, name: str = "",
         pass
 
     score = _aggregate(headlines)
+    red_flag, flag_terms, worst = _red_flags(headlines)
     return {
         "score": score,
         "label": _label(score),
         "points": round(score * config.WEIGHTS["news"]),
         "headlines": headlines,
+        "red_flag": red_flag,
+        "flag_terms": flag_terms,
+        "worst_sent": worst,
     }
 
 

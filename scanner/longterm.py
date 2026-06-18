@@ -189,11 +189,18 @@ def evaluate(symbol, name, industry, ticker, info, daily, news=None,
     horizon = ("Short (<9m)" if days and days < 270 else
                "Medium (9-24m)" if days and days < 730 else "Long (24m+)")
 
+    rec = _recommendation(score, price, sma200, upside)
+    # NEWS VETO: a major negative event blocks a Buy regardless of fundamentals
+    news_risk = bool(apply_news and news and news.get("red_flag"))
+    flag_terms = (news or {}).get("flag_terms", []) if news_risk else []
+    if news_risk:
+        rec = "🔴 AVOID — ⚠️ NEWS RISK"
+
     return {
         "symbol": symbol, "name": info.get("longName") or name,
         "industry": info.get("sector") or industry, "ticker": ticker,
         "price": round(price, 2), "score": round(score, 1), "contrib": contrib,
-        "recommendation": _recommendation(score, price, sma200, upside),
+        "recommendation": rec, "news_risk": news_risk, "flag_terms": flag_terms,
         "target": round(target, 2), "target_src": target_src,
         "upside_pct": round(upside_pct, 1),
         "stop_loss": round(sl, 2), "downside_pct": round(downside_pct, 1),

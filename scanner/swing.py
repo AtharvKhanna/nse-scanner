@@ -158,10 +158,17 @@ def evaluate(symbol, name, industry, ticker, daily, nifty_ret_3m=0.0,
         price, atr_val, atr_pct, ret_1m, high_20d, high_52w)
     rr = upside_pct / downside_pct if downside_pct > 0 else None
 
+    rec = _recommendation(score, price, ema50)
+    # NEWS VETO: bad news (e.g. big loss, fraud, downgrade) blocks a Buy/Watch
+    news_risk = bool(apply_news and news and news.get("red_flag"))
+    flag_terms = (news or {}).get("flag_terms", []) if news_risk else []
+    if news_risk:
+        rec = "🔴 AVOID — ⚠️ NEWS RISK"
+
     return {
         "symbol": symbol, "name": name, "industry": industry, "ticker": ticker,
         "price": round(price, 2), "score": round(score, 1), "contrib": contrib,
-        "recommendation": _recommendation(score, price, ema50),
+        "recommendation": rec, "news_risk": news_risk, "flag_terms": flag_terms,
         "target": round(target, 2), "upside_pct": round(upside_pct, 1),
         "stop_loss": round(sl, 2), "downside_pct": round(downside_pct, 1),
         "rr": round(rr, 2) if rr else None,

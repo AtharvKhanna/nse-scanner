@@ -191,6 +191,10 @@ def _lt_detail(df, news_map):
 
     st.markdown(f"## {r['symbol']} — {r['name']}")
     st.markdown(f"### {rec}  ·  Score {r['score']:.0f}/100  ·  {r['industry']}")
+    if r.get("news_risk"):
+        terms = ", ".join(r.get("flag_terms", [])) or "negative news"
+        st.error(f"⚠️ **News override:** recent headlines mention **{terms}** — this blocks "
+                 "the Buy rating despite the score. Read the news below before any decision.")
 
     # The plan the user asked for
     p1, p2, p3, p4 = st.columns(4)
@@ -465,6 +469,10 @@ def render_swing(scope, with_news, news_limit, stamp, min_upside, min_score, onl
         rec = r["recommendation"]
         st.markdown(f"## {r['symbol']} — {r['name']}")
         st.markdown(f"### {rec}  ·  Score {r['score']:.0f}/100  ·  {r['industry']}")
+        if r.get("news_risk"):
+            terms = ", ".join(r.get("flag_terms", [])) or "negative news"
+            st.error(f"⚠️ **News override:** recent headlines mention **{terms}** — this blocks "
+                     "the Buy rating despite the score. Read the news below before any trade.")
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Current price", f"₹{r['price']:.1f}")
         p2.metric("Target", f"₹{r['target']:.1f}", f"{r['upside_pct']:+.1f}%")

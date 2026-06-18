@@ -179,7 +179,10 @@ def score_features(f: dict, regime: str = "neutral",
     elif (not math.isnan(f["turnover_cr"])) and f["turnover_cr"] < config.GATE_MIN_TURNOVER_CR:
         gated, gate_reason = True, "illiquid"
 
+    news_risk = bool(apply_news and news and news.get("red_flag"))
     if gated:
+        signal = "AVOID"
+    elif news_risk:                       # NEWS VETO: bad news blocks a signal
         signal = "AVOID"
     elif final >= config.SIGNAL_STRONG_BUY:
         signal = "STRONG BUY"
@@ -199,6 +202,8 @@ def score_features(f: dict, regime: str = "neutral",
         "news_label": (news or {}).get("label", "—"),
         "signal": signal,
         "gated": gated, "gate_reason": gate_reason,
+        "news_risk": news_risk,
+        "flag_terms": (news or {}).get("flag_terms", []) if news_risk else [],
         "fake_breakout": _fake_breakout(f, breakout),
     })
     return out
