@@ -10,7 +10,38 @@ import time
 from playwright.sync_api import sync_playwright
 
 URL = os.environ.get("APP_URL", "https://nsescanner123.streamlit.app/")
-MAX_WAIT = int(os.environ.get("MAX_WAIT", "210"))  # seconds to wait for data
+MAX_WAIT = int(os.environ.get("MAX_WAIT", "330"))  # seconds to wait for data
+
+# Any of these appearing means the scan finished and data is cached.
+LOADED_MARKERS = ["auto-updates after market close", "Stocks shown", "Buy now",
+                  "Last updated"]
+WAKE_MARKERS = ["get this app back up", "Yes, get this app back up", "is asleep"]
+
+
+def _visible_text(page):
+    try:
+        return page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        return ""
+
+
+def _try_wake(page):
+    """If the Streamlit sleep screen is shown, click the wake button."""
+    txt = _visible_text(page).lower()
+    if any(m.lower() in txt for m in WAKE_MARKERS):
+        print("App is asleep — attempting to wake it")
+        for sel in ['button:has-text("back up")', 'text=/back up/i',
+                    'button:has-text("Yes")']:
+            try:
+                el = page.locator(sel).first
+                if el.count() > 0:
+                    el.click(timeout=5000)
+                    print(f"Clicked wake control: {sel}")
+                    page.wait_for_timeout(10000)
+                    return True
+            except Exception as e:
+                print("wake click failed:", sel, e)
+    return False
 
 
 def main():
@@ -19,40 +50,33 @@ def main():
         page = browser.new_page()
         print(f"Opening {URL}")
         page.goto(URL, timeout=120000, wait_until="domcontentloaded")
+        page.wait_for_timeout(8000)
 
-        # If the app is asleep, Streamlit shows a wake-up button — click it.
+        # Wake the app if needed (retry a couple of times).
         for _ in range(3):
-            try:
-                btn = page.get_by_text("get this app back up", exact=False)
-                if btn.count() > 0:
-                    print("App was asleep — clicking wake button")
-                    btn.first.click()
-                    page.wait_for_timeout(8000)
-                else:
-                    break
-            except Exception as e:
-                print("wake check:", e)
+            if _try_wake(page):
+                page.wait_for_timeout(8000)
+            else:
                 break
 
-        # Wait until the scan finishes — the 'Last updated' caption appears once data loads.
+        # Poll until a "data loaded" marker shows up.
         deadline = time.time() + MAX_WAIT
         loaded = False
         while time.time() < deadline:
-            try:
-                if page.get_by_text("Last updated", exact=False).count() > 0:
-                    loaded = True
-                    break
-            except Exception:
-                pass
-            page.wait_for_timeout(3000)
+            _try_wake(page)  # in case it fell back to sleep screen
+            txt = _visible_text(page)
+            if any(m.lower() in txt.lower() for m in LOADED_MARKERS):
+                loaded = True
+                break
+            time.sleep(5)
 
-        # Let the server finish writing its cache.
-        page.wait_for_timeout(6000)
+        page.wait_for_timeout(6000)  # let the server finish writing its cache
         print(f"Data loaded: {loaded}")
-        browser.close()
         if not loaded:
-            # don't hard-fail the job; the app may still have warmed
-            print("WARNING: 'Last updated' not detected within timeout.")
+            print("PAGE TITLE:", page.title())
+            print("VISIBLE TEXT (first 800 chars):")
+            print(_visible_text(page)[:800])
+        browser.close()
 
 
 if __name__ == "__main__":
