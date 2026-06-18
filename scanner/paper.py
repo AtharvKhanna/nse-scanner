@@ -48,8 +48,12 @@ def reset() -> None:
         os.remove(STATE_PATH)
 
 
-def init_state(capital: float = config.PAPER_CAPITAL,
-               positions: int = config.PAPER_POSITIONS) -> dict:
+def init_state(capital: float = None, positions: int = None) -> dict:
+    # Resolve at call time (not import time) so a stale config module can't crash import.
+    if capital is None:
+        capital = getattr(config, "PAPER_CAPITAL", 10000)
+    if positions is None:
+        positions = getattr(config, "PAPER_POSITIONS", 1)
     state = {
         "start_date": _today(),
         "capital": float(capital),
@@ -69,7 +73,7 @@ def _eligible(swing_df: pd.DataFrame) -> pd.DataFrame:
     d = swing_df[swing_df["recommendation"].astype(str).str.contains("BUY")].copy()
     if "news_risk" in d.columns:
         d = d[~d["news_risk"].fillna(False)]
-    d = d[d["price"] <= config.PAPER_MAX_PRICE]
+    d = d[d["price"] <= getattr(config, "PAPER_MAX_PRICE", 5000)]
     return d
 
 

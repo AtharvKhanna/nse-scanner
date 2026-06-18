@@ -556,8 +556,9 @@ def render_paper(scope, with_news, news_limit, stamp):
                 "is hit — so you can see how the strategy performs with **zero real risk**.")
         c = st.columns(2)
         cap = c[0].number_input("Starting capital (₹)", 1000, 1_000_000,
-                                config.PAPER_CAPITAL, step=1000)
-        pos = c[1].number_input("Stocks held at once", 1, 5, config.PAPER_POSITIONS)
+                                getattr(config, "PAPER_CAPITAL", 10000), step=1000)
+        pos = c[1].number_input("Stocks held at once", 1, 5,
+                                getattr(config, "PAPER_POSITIONS", 1))
         if st.button("▶️ Start paper trading", type="primary"):
             res = cached_swing(scope, with_news, news_limit, stamp)
             s = paper.init_state(cap, pos)
