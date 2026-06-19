@@ -232,7 +232,8 @@ def run_backtest(scope="nifty500", years=2, capital=100000, max_positions=5,
 def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
                           lookback=252, skip=21, rebal_days=21, vol_adjust=True,
                           regime_filter=True, above_200dma=True, regime_ma=200,
-                          end_offset_days=0,
+                          cost_pct=0.0, low_vol_pool=1.0, weight_mode="equal",
+                          max_per_sector=None, end_offset_days=0,
                           progress: Optional[Callable[[float, str], None]] = None) -> dict:
     """Cross-sectional momentum (Jegadeesh-Titman / Nifty Momentum-30 style).
 
@@ -248,6 +249,7 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
     uni = universe.load_universe(scope)
     tickers = [u["ticker"] for u in uni]
     name = {u["ticker"]: u["symbol"] for u in uni}
+    sector_of = {u["symbol"]: (u.get("industry") or "—") for u in uni}
 
     report(0.1, "Downloading history…")
     hist_days = int(years * 365 + end_offset_days + 520)
@@ -259,8 +261,8 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
     report(0.5, "Computing momentum…")
     close = pd.DataFrame({name[t]: df["Close"] for t, df in hist.items()})
     mom = close.shift(skip) / close.shift(lookback) - 1          # 12-1 momentum
+    vol = close.pct_change().rolling(lookback).std()            # used for tilt/weighting
     if vol_adjust:
-        vol = close.pct_change().rolling(lookback).std()
         mom = mom / vol.replace(0, np.nan)
     sma200 = close.rolling(200).mean()
 
@@ -290,33 +292,66 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
 
         if di % rebal_days != 0:
             continue
-        # rebalance: realise basket return
+        # realise current basket value
         if shares:
             rets.append(port / last_rebal_val - 1)
             equity = port
-        last_rebal_val = equity
-        shares = {}
-        # regime: only invest when market above its 200-DMA
+
+        # regime: only invest when market above its regime-MA
         regime_ok = True
         if regime_filter:
             im = idx_ma.get(date)
             ic = idx_close.get(date)
             regime_ok = ic is not None and im == im and ic > im
-        if not regime_ok:
-            continue   # stay in cash
-        row = mom.loc[date].dropna()
-        if above_200dma:
-            ok = close.loc[date] > sma200.loc[date]
-            row = row[ok.reindex(row.index).fillna(False)]
-        row = row[row > 0]                     # absolute momentum: positive only
-        picks = row.sort_values(ascending=False).index[:top_n]
-        if len(picks) == 0:
-            continue
-        alloc = equity / len(picks)
-        for st in picks:
+
+        new_weights = {}
+        if regime_ok:
+            row = mom.loc[date].dropna()
+            if above_200dma:
+                ok = close.loc[date] > sma200.loc[date]
+                row = row[ok.reindex(row.index).fillna(False)]
+            row = row[row > 0]                       # absolute momentum: positive only
+            ranked = row.sort_values(ascending=False)
+            # momentum-crash protection: from a larger momentum pool, prefer low-vol names
+            pool = list(ranked.index[:int(top_n * low_vol_pool)])
+            if low_vol_pool > 1:
+                vr = vol.loc[date].reindex(pool)
+                pool = list(vr.sort_values().index)   # ascending volatility
+            # select top_n, capping per sector
+            picks, sec_count = [], {}
+            for st in pool:
+                if max_per_sector:
+                    sec = sector_of.get(st, "—")
+                    if sec_count.get(sec, 0) >= max_per_sector:
+                        continue
+                    sec_count[sec] = sec_count.get(sec, 0) + 1
+                picks.append(st)
+                if len(picks) >= top_n:
+                    break
+            if picks:
+                if weight_mode == "inv_vol":
+                    inv = {st: 1.0 / vol.at[date, st] for st in picks
+                           if vol.at[date, st] == vol.at[date, st] and vol.at[date, st] > 0}
+                    tot = sum(inv.values()) or 1.0
+                    new_weights = {st: inv.get(st, 0) / tot for st in picks}
+                else:
+                    new_weights = {st: 1.0 / len(picks) for st in picks}
+
+        # transaction cost on turnover (old value vs new target value)
+        old_val = {st: shares[st] * close.at[date, st] for st in shares
+                   if close.at[date, st] == close.at[date, st]}
+        new_val = {st: w * equity for st, w in new_weights.items()}
+        traded = sum(abs(new_val.get(st, 0) - old_val.get(st, 0))
+                     for st in set(old_val) | set(new_val))
+        equity -= traded * cost_pct
+        last_rebal_val = equity
+
+        # set new shares
+        shares = {}
+        for st, w in new_weights.items():
             px = close.at[date, st]
             if px == px and px > 0:
-                shares[st] = alloc / px
+                shares[st] = (w * equity) / px
 
     report(0.95, "Metrics…")
     eq = pd.Series(dict(curve)).sort_index()

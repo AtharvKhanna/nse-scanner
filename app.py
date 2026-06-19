@@ -623,9 +623,10 @@ def render_paper(scope, with_news, news_limit, stamp):
 # ==========================================================================
 def render_momentum(scope, stamp):
     st.title("🚀 Momentum Portfolio — the backtest-winning strategy")
-    st.caption("Cross-sectional 12-1 momentum (Jegadeesh-Titman / Nifty Momentum-30 style) "
-               "+ go-to-cash when the Nifty is below its 50-DMA. **Rebalance ~monthly.** "
-               "Backtest (4y): ~30%/yr, −13% max drawdown, vs Nifty ~12%/yr.")
+    st.caption("Cross-sectional 12-1 momentum (Jegadeesh-Titman / Nifty Momentum-30 style), "
+               "inverse-volatility weighted + go-to-cash when the Nifty is below its 50-DMA. "
+               "**Rebalance ~monthly.** Backtest (4y, **after ~0.3% costs**): ~**27%/yr**, "
+               "−13% max drawdown, vs Nifty ~12%/yr.")
     c = st.columns([1, 1, 2])
     top_n = c[0].number_input("Stocks to hold", 5, 30, config.MOM_TOP_N)
     capital = c[1].number_input("Capital (₹)", 5000, 10_000_000, config.MOM_CAPITAL, step=5000)
@@ -645,13 +646,14 @@ def render_momentum(scope, stamp):
     if h.empty:
         st.warning("No qualifying momentum stocks right now.")
         return
-    show = h[["rank", "symbol", "name", "industry", "price", "ret_12m_pct",
-              "mom_score", "qty", "cost"]].rename(columns={
+    cols = ["rank", "symbol", "name", "industry", "price", "ret_12m_pct", "mom_score"]
+    cols += [c for c in ["weight_pct", "qty", "cost"] if c in h.columns]
+    show = h[cols].rename(columns={
         "rank": "#", "symbol": "SYMBOL", "name": "COMPANY", "industry": "SECTOR",
         "price": "PRICE ₹", "ret_12m_pct": "12-MO RETURN %", "mom_score": "MOM SCORE",
-        "qty": "QTY", "cost": "COST ₹"})
+        "weight_pct": "WEIGHT %", "qty": "QTY", "cost": "COST ₹"})
     st.dataframe(show.style.format({"PRICE ₹": "{:.1f}", "12-MO RETURN %": "{:+.0f}",
-                 "MOM SCORE": "{:.1f}", "COST ₹": "{:,.0f}"}),
+                 "MOM SCORE": "{:.1f}", "WEIGHT %": "{:.1f}", "COST ₹": "{:,.0f}"}),
                  hide_index=True, use_container_width=True, height=min(620, 60 + 35 * len(show)))
     st.caption(f"Deployed ₹{res['deployed']:,.0f} of ₹{capital:,.0f} across {len(h)} stocks "
                f"· {res['candidates']} stocks qualified.")
@@ -684,10 +686,11 @@ def cached_backtest(scope, years, max_positions, max_hold, threshold, regime,
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
-def cached_mom_backtest(scope, years, top_n, regime_ma, _stamp):
+def cached_mom_backtest(scope, years, top_n, regime_ma, cost_pct, weight_mode, _stamp):
     bar = st.progress(0.0, text="Starting backtest…")
     res = backtest.run_momentum_backtest(
         scope=scope, years=years, capital=100000, top_n=top_n, regime_ma=regime_ma,
+        cost_pct=cost_pct, weight_mode=weight_mode,
         progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
     bar.empty()
     return res
@@ -701,15 +704,18 @@ def render_backtest(scope, stamp):
                      horizontal=True)
 
     if strat.startswith("🚀"):
-        c = st.columns(3)
+        c = st.columns(4)
         years = c[0].slider("Years", 1, 4, 4)
         top_n = c[1].slider("Stocks held", 5, 30, 15)
         regime_ma = c[2].select_slider("Regime MA (go to cash below)", [50, 100, 200], value=50)
+        weight = c[3].selectbox("Weighting", ["inv_vol", "equal"], index=0)
+        costs = st.toggle("Apply realistic costs (~0.3%/rebalance)", value=True)
         if not st.button("▶️ Run backtest", type="primary"):
             st.info("Cross-sectional 12-1 momentum + cash when Nifty < its regime-MA, monthly "
-                    "rebalance. Click **Run backtest** (~1–2 min).")
+                    "rebalance, inverse-volatility weighting. Click **Run backtest** (~1–2 min).")
             return
-        res = cached_mom_backtest(scope, years, top_n, regime_ma, stamp)
+        res = cached_mom_backtest(scope, years, top_n, regime_ma,
+                                  0.003 if costs else 0.0, weight, stamp)
         _backtest_results(res, has_trades=False)
         return
 
