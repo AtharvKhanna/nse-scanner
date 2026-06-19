@@ -15,6 +15,11 @@ import streamlit as st
 
 from scanner import config, scan, longterm, swing, paper, backtest, momentum
 
+# Streamlit Cloud sometimes keeps an old cached `config` module after a deploy; reloading
+# it re-reads the new file in place so newly-added settings (e.g. MOM_*) are always present.
+import importlib  # noqa: E402
+importlib.reload(config)
+
 st.set_page_config(page_title="NSE Stock Scanner", page_icon="📈", layout="wide")
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -642,8 +647,9 @@ def render_momentum(scope, stamp):
             "caps, concentration. **Caveat:** backtest ≠ future; momentum has occasional crash "
             "years. Not investment advice.")
     c = st.columns([1, 1, 2])
-    top_n = c[0].number_input("Stocks to hold", 5, 30, config.MOM_TOP_N)
-    capital = c[1].number_input("Capital (₹)", 5000, 10_000_000, config.MOM_CAPITAL, step=5000)
+    top_n = c[0].number_input("Stocks to hold", 5, 30, getattr(config, "MOM_TOP_N", 15))
+    capital = c[1].number_input("Capital (₹)", 5000, 10_000_000,
+                                getattr(config, "MOM_CAPITAL", 10000), step=5000)
 
     res = cached_momentum(scope, top_n, capital, stamp)
 
