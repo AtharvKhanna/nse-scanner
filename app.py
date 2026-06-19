@@ -627,6 +627,20 @@ def render_momentum(scope, stamp):
                "inverse-volatility weighted + go-to-cash when the Nifty is below its 50-DMA. "
                "**Rebalance ~monthly.** Backtest (4y, **after ~0.3% costs**): ~**27%/yr**, "
                "−13% max drawdown, vs Nifty ~12%/yr.")
+    with st.expander("📊 Why this strategy? (research + backtest)"):
+        st.markdown(
+            "Chosen after researching the academic literature (Jegadeesh-Titman momentum, "
+            "Antonacci dual momentum, Blitz residual momentum) and **backtesting every variant "
+            "with realistic costs**. This exact configuration was the robust winner.\n\n"
+            "| Period (Nifty 500) | This strategy | Buy & hold Nifty |\n"
+            "|---|--:|--:|\n"
+            "| 4-year (bull + chop), net of ~0.3% costs | **~27%/yr, −13% max DD** | ~12%/yr |\n\n"
+            "**Criteria:** 12-1 cross-sectional momentum · volatility-adjusted ranking · "
+            "inverse-volatility weighting · hold only when Nifty > 50-DMA (else cash) · top-15 · "
+            "monthly rebalance.\n\n"
+            "Tested-and-rejected (didn't help / hurt): residual momentum, low-vol tilt, sector "
+            "caps, concentration. **Caveat:** backtest ≠ future; momentum has occasional crash "
+            "years. Not investment advice.")
     c = st.columns([1, 1, 2])
     top_n = c[0].number_input("Stocks to hold", 5, 30, config.MOM_TOP_N)
     capital = c[1].number_input("Capital (₹)", 5000, 10_000_000, config.MOM_CAPITAL, step=5000)

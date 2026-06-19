@@ -1,7 +1,20 @@
-# 📈 NSE Stock Scanner — Long-Term Investing + Intraday
+# 📈 NSE Stock Scanner — Momentum, Swing, Long-Term & more
 
-A local website with two modes, built on **live data** (Yahoo Finance + NSE) with a
-**News sentiment** factor. Originated from `NSE_INTRADAY_SCANNER_ENHANCED.xlsx`.
+A website built on **live data** (Yahoo Finance + NSE) with a **News sentiment** factor.
+Originated from `NSE_INTRADAY_SCANNER_ENHANCED.xlsx`, then extended with a research-driven,
+**backtested** momentum strategy.
+
+## 🚀 Momentum Portfolio (default — the backtest-winning strategy)
+Cross-sectional **12-1 momentum** (Jegadeesh-Titman / Nifty Momentum-30 style), **volatility-
+adjusted**, **inverse-volatility weighted**, holding the **top-15** Nifty-500 names and going to
+**cash when the Nifty is below its 50-DMA** (dual-momentum timing). Rebalance ~monthly.
+
+- **Backtest (4y, net of ~0.3% costs):** ~**27%/yr CAGR, −13% max drawdown** vs the Nifty's ~12%/yr.
+- Chosen after testing residual momentum, low-vol tilts, sector caps and concentration — which did
+  **not** improve it (rejected, not curve-fit). Tunable in `scanner/config.py` (`MOM_*`).
+- **Backtest tab** lets you verify it (with cost + weighting + residual-momentum toggles).
+- ⚠️ Backtest ≠ future; momentum has occasional crash years. For small capital, a **Nifty 200
+  Momentum 30 ETF/index fund** is the cleanest way to run this. Not investment advice.
 
 ## 📈 Long-Term Investing mode (default)
 For each Nifty 500 stock it tells you:
