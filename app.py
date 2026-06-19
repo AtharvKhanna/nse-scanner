@@ -686,11 +686,11 @@ def cached_backtest(scope, years, max_positions, max_hold, threshold, regime,
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
-def cached_mom_backtest(scope, years, top_n, regime_ma, cost_pct, weight_mode, _stamp):
+def cached_mom_backtest(scope, years, top_n, regime_ma, cost_pct, weight_mode, signal, _stamp):
     bar = st.progress(0.0, text="Starting backtest…")
     res = backtest.run_momentum_backtest(
         scope=scope, years=years, capital=100000, top_n=top_n, regime_ma=regime_ma,
-        cost_pct=cost_pct, weight_mode=weight_mode,
+        cost_pct=cost_pct, weight_mode=weight_mode, signal=signal,
         progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
     bar.empty()
     return res
@@ -709,13 +709,17 @@ def render_backtest(scope, stamp):
         top_n = c[1].slider("Stocks held", 5, 30, 15)
         regime_ma = c[2].select_slider("Regime MA (go to cash below)", [50, 100, 200], value=50)
         weight = c[3].selectbox("Weighting", ["inv_vol", "equal"], index=0)
-        costs = st.toggle("Apply realistic costs (~0.3%/rebalance)", value=True)
+        cc = st.columns(2)
+        costs = cc[0].toggle("Apply realistic costs (~0.3%/rebalance)", value=True)
+        sig = cc[1].selectbox("Momentum type", ["total", "residual (crash-resistant)"], index=0)
+        signal = "residual" if sig.startswith("residual") else "total"
         if not st.button("▶️ Run backtest", type="primary"):
             st.info("Cross-sectional 12-1 momentum + cash when Nifty < its regime-MA, monthly "
-                    "rebalance, inverse-volatility weighting. Click **Run backtest** (~1–2 min).")
+                    "rebalance, inverse-volatility weighting. 'Residual' ranks market-adjusted "
+                    "returns (lower drawdowns in crashes). Click **Run backtest** (~1–2 min).")
             return
         res = cached_mom_backtest(scope, years, top_n, regime_ma,
-                                  0.003 if costs else 0.0, weight, stamp)
+                                  0.003 if costs else 0.0, weight, signal, stamp)
         _backtest_results(res, has_trades=False)
         return
 

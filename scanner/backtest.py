@@ -233,7 +233,7 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
                           lookback=252, skip=21, rebal_days=21, vol_adjust=True,
                           regime_filter=True, above_200dma=True, regime_ma=200,
                           cost_pct=0.0, low_vol_pool=1.0, weight_mode="equal",
-                          max_per_sector=None, end_offset_days=0,
+                          max_per_sector=None, signal="total", end_offset_days=0,
                           progress: Optional[Callable[[float, str], None]] = None) -> dict:
     """Cross-sectional momentum (Jegadeesh-Titman / Nifty Momentum-30 style).
 
@@ -265,6 +265,30 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
     if vol_adjust:
         mom = mom / vol.replace(0, np.nan)
     sma200 = close.rolling(200).mean()
+    ret_df = close.pct_change()                                 # for residual momentum
+    mkt_ret = idx_close.pct_change()
+
+    def residual_scores(date):
+        """Idiosyncratic momentum (Blitz): info-ratio of market-adjusted residuals."""
+        pos = ret_df.index.get_loc(date)
+        if pos < lookback:
+            return pd.Series(dtype=float)
+        win = ret_df.iloc[pos - lookback:pos - skip]
+        mv = mkt_ret.reindex(win.index).values
+        wv = win.values
+        mask = ~np.isnan(mv)
+        mv, wv = mv[mask], wv[mask]
+        if len(mv) < 30:
+            return pd.Series(dtype=float)
+        mean_m = np.nanmean(mv)
+        var_m = np.nanmean(mv * mv) - mean_m ** 2
+        if var_m <= 0:
+            return pd.Series(dtype=float)
+        cov = np.nanmean(wv * mv[:, None], axis=0) - np.nanmean(wv, axis=0) * mean_m
+        beta = cov / var_m
+        resid = wv - mv[:, None] * beta[None, :]
+        ir = np.nanmean(resid, axis=0) / np.nanstd(resid, axis=0)
+        return pd.Series(ir, index=win.columns)
 
     dates = close.index.sort_values()
     end = dates[-1] - pd.Timedelta(days=int(end_offset_days))
@@ -278,16 +302,12 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
     rets = []          # per-rebalance basket returns for win-rate
     last_rebal_val = capital
     for di, date in enumerate(dates):
-        # mark-to-market
-        val = sum(s * close.at[date, st] for st, s in shares.items()
-                  if close.at[date, st] == close.at[date, st])
-        cash = equity - sum(s * 0 for s in shares.values())  # placeholder
-        port = (val if shares else 0.0)
-        # equity tracked as cash-when-flat + market value
+        # mark-to-market (cash when flat, else market value of basket)
         if not shares:
             port = equity
         else:
-            port = val
+            port = sum(s * close.at[date, st] for st, s in shares.items()
+                       if close.at[date, st] == close.at[date, st])
         curve.append((date, port))
 
         if di % rebal_days != 0:
@@ -306,11 +326,15 @@ def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
 
         new_weights = {}
         if regime_ok:
-            row = mom.loc[date].dropna()
+            if signal == "residual":
+                row = residual_scores(date).dropna()
+                row = row[row > 0]                   # positive idiosyncratic momentum
+            else:
+                row = mom.loc[date].dropna()
+                row = row[row > 0]                   # absolute momentum: positive only
             if above_200dma:
                 ok = close.loc[date] > sma200.loc[date]
                 row = row[ok.reindex(row.index).fillna(False)]
-            row = row[row > 0]                       # absolute momentum: positive only
             ranked = row.sort_values(ascending=False)
             # momentum-crash protection: from a larger momentum pool, prefer low-vol names
             pool = list(ranked.index[:int(top_n * low_vol_pool)])
