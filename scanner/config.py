@@ -148,6 +148,20 @@ PAPER_CAPITAL = 10000
 PAPER_POSITIONS = 1          # how many stocks held at once (default: all-in 1)
 PAPER_MAX_PRICE = 5000       # skip names too pricey to buy even 1 share sensibly
 
+# ==========================================================================
+# MOMENTUM PORTFOLIO  (backtest-winning strategy: +30%/yr CAGR, -13% maxDD)
+# Cross-sectional 12-1 momentum (Jegadeesh-Titman / Nifty Momentum-30 style) +
+# dual-momentum regime timing (hold only when Nifty > its 50-DMA) + vol-adjusted
+# ranking. Monthly rebalance. Proven robust across bull AND choppy markets.
+# ==========================================================================
+MOM_TOP_N = 15               # number of stocks to hold (equal weight)
+MOM_LOOKBACK = 252           # ~12 months
+MOM_SKIP = 21                # skip most recent ~1 month (short-term reversal)
+MOM_VOL_ADJUST = True        # divide return by volatility (risk-adjusted momentum)
+MOM_REGIME_MA = 50           # go to cash when Nifty closes below its 50-DMA
+MOM_REBAL_DAYS = 21          # rebalance ~monthly
+MOM_CAPITAL = 10000
+
 # --------------------------------------------------------------------------
 # Data fetch
 # --------------------------------------------------------------------------

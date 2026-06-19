@@ -229,6 +229,121 @@ def run_backtest(scope="nifty500", years=2, capital=100000, max_positions=5,
             "metrics": metrics}
 
 
+def run_momentum_backtest(scope="nifty500", years=2, capital=100000, top_n=15,
+                          lookback=252, skip=21, rebal_days=21, vol_adjust=True,
+                          regime_filter=True, above_200dma=True, regime_ma=200,
+                          end_offset_days=0,
+                          progress: Optional[Callable[[float, str], None]] = None) -> dict:
+    """Cross-sectional momentum (Jegadeesh-Titman / Nifty Momentum-30 style).
+
+    Each rebalance, hold the top-N stocks by their (lookback - skip) return
+    (optionally volatility-adjusted), equal weight; go to cash when the market is
+    below its 200-DMA. Rebalanced every `rebal_days`.
+    """
+    def report(p, m):
+        if progress:
+            progress(p, m)
+
+    report(0.05, "Loading universe…")
+    uni = universe.load_universe(scope)
+    tickers = [u["ticker"] for u in uni]
+    name = {u["ticker"]: u["symbol"] for u in uni}
+
+    report(0.1, "Downloading history…")
+    hist_days = int(years * 365 + end_offset_days + 520)
+    hist = data.fetch_daily(tickers, hist_days)
+    nidx = data.fetch_daily(["^NSEI"], hist_days).get("^NSEI")
+    idx_close = nidx["Close"].dropna()
+    idx_ma = idx_close.rolling(regime_ma).mean()
+
+    report(0.5, "Computing momentum…")
+    close = pd.DataFrame({name[t]: df["Close"] for t, df in hist.items()})
+    mom = close.shift(skip) / close.shift(lookback) - 1          # 12-1 momentum
+    if vol_adjust:
+        vol = close.pct_change().rolling(lookback).std()
+        mom = mom / vol.replace(0, np.nan)
+    sma200 = close.rolling(200).mean()
+
+    dates = close.index.sort_values()
+    end = dates[-1] - pd.Timedelta(days=int(end_offset_days))
+    start = end - pd.Timedelta(days=int(years * 365))
+    dates = dates[(dates >= start) & (dates <= end)]
+
+    report(0.7, "Simulating rebalances…")
+    equity = capital
+    shares = {}
+    curve = []
+    rets = []          # per-rebalance basket returns for win-rate
+    last_rebal_val = capital
+    for di, date in enumerate(dates):
+        # mark-to-market
+        val = sum(s * close.at[date, st] for st, s in shares.items()
+                  if close.at[date, st] == close.at[date, st])
+        cash = equity - sum(s * 0 for s in shares.values())  # placeholder
+        port = (val if shares else 0.0)
+        # equity tracked as cash-when-flat + market value
+        if not shares:
+            port = equity
+        else:
+            port = val
+        curve.append((date, port))
+
+        if di % rebal_days != 0:
+            continue
+        # rebalance: realise basket return
+        if shares:
+            rets.append(port / last_rebal_val - 1)
+            equity = port
+        last_rebal_val = equity
+        shares = {}
+        # regime: only invest when market above its 200-DMA
+        regime_ok = True
+        if regime_filter:
+            im = idx_ma.get(date)
+            ic = idx_close.get(date)
+            regime_ok = ic is not None and im == im and ic > im
+        if not regime_ok:
+            continue   # stay in cash
+        row = mom.loc[date].dropna()
+        if above_200dma:
+            ok = close.loc[date] > sma200.loc[date]
+            row = row[ok.reindex(row.index).fillna(False)]
+        row = row[row > 0]                     # absolute momentum: positive only
+        picks = row.sort_values(ascending=False).index[:top_n]
+        if len(picks) == 0:
+            continue
+        alloc = equity / len(picks)
+        for st in picks:
+            px = close.at[date, st]
+            if px == px and px > 0:
+                shares[st] = alloc / px
+
+    report(0.95, "Metrics…")
+    eq = pd.Series(dict(curve)).sort_index()
+    bench = idx_close.reindex(eq.index).ffill()
+    bench = bench / bench.iloc[0] * capital if len(bench) and bench.iloc[0] else bench
+    rets = pd.Series(rets)
+    days = (eq.index[-1] - eq.index[0]).days or 1
+    roll = eq.cummax()
+    metrics = {
+        "total_return_pct": round((eq.iloc[-1] / capital - 1) * 100, 1),
+        "cagr_pct": round(((eq.iloc[-1] / capital) ** (365 / days) - 1) * 100, 1),
+        "max_drawdown_pct": round(((eq - roll) / roll).min() * 100, 1),
+        "num_trades": int((rets != 0).sum()),
+        "win_rate_pct": round((rets > 0).mean() * 100, 1) if len(rets) else None,
+        "avg_win_pct": round(rets[rets > 0].mean() * 100, 1) if (rets > 0).any() else None,
+        "avg_loss_pct": round(rets[rets <= 0].mean() * 100, 1) if (rets <= 0).any() else None,
+        "profit_factor": round(rets[rets > 0].sum() / -rets[rets <= 0].sum(), 2)
+        if (rets <= 0).any() and rets[rets <= 0].sum() != 0 else None,
+        "nifty_return_pct": round((bench.iloc[-1] / capital - 1) * 100, 1) if len(bench) else None,
+        "final_value": round(eq.iloc[-1], 0),
+        "start": eq.index[0].date().isoformat(),
+        "end": eq.index[-1].date().isoformat(),
+    }
+    report(1.0, "Done")
+    return {"equity": eq, "benchmark": bench, "metrics": metrics}
+
+
 def _metrics(eq, trades, capital, idx_close):
     if len(eq) < 2:
         return {}

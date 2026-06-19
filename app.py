@@ -13,7 +13,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from scanner import config, scan, longterm, swing, paper, backtest
+from scanner import config, scan, longterm, swing, paper, backtest, momentum
 
 st.set_page_config(page_title="NSE Stock Scanner", page_icon="📈", layout="wide")
 
@@ -77,6 +77,11 @@ def cached_longterm(scope, with_news, news_limit, _stamp):
     res["fetched_at"] = _ist_now_str()
     bar.empty()
     return res
+
+
+@st.cache_data(ttl=config.DAILY_TTL, show_spinner="Computing momentum portfolio…")
+def cached_momentum(scope, top_n, capital, _stamp):
+    return momentum.momentum_portfolio(scope, top_n=top_n, capital=capital)
 
 
 @st.cache_data(ttl=config.DAILY_TTL, show_spinner=False)
@@ -614,6 +619,55 @@ def render_paper(scope, with_news, news_limit, stamp):
 
 
 # ==========================================================================
+# MOMENTUM PORTFOLIO VIEW (the backtest-winning strategy)
+# ==========================================================================
+def render_momentum(scope, stamp):
+    st.title("🚀 Momentum Portfolio — the backtest-winning strategy")
+    st.caption("Cross-sectional 12-1 momentum (Jegadeesh-Titman / Nifty Momentum-30 style) "
+               "+ go-to-cash when the Nifty is below its 50-DMA. **Rebalance ~monthly.** "
+               "Backtest (4y): ~30%/yr, −13% max drawdown, vs Nifty ~12%/yr.")
+    c = st.columns([1, 1, 2])
+    top_n = c[0].number_input("Stocks to hold", 5, 30, config.MOM_TOP_N)
+    capital = c[1].number_input("Capital (₹)", 5000, 10_000_000, config.MOM_CAPITAL, step=5000)
+
+    res = cached_momentum(scope, top_n, capital, stamp)
+
+    if not res["in_market"]:
+        st.error(f"🔴 **OUT OF MARKET — hold CASH.** The Nifty ({res['nifty']:.0f}) is **below "
+                 f"its {res['regime_ma']}-DMA** ({res['nifty_ma']:.0f}), signalling market weakness. "
+                 "The strategy stays in cash until the Nifty reclaims its 50-DMA — this is what "
+                 "protects you from drawdowns. **Don't buy momentum stocks now.**")
+        return
+
+    st.success(f"🟢 **IN MARKET.** Nifty ({res['nifty']:.0f}) is above its {res['regime_ma']}-DMA "
+               f"({res['nifty_ma']:.0f}) → hold the top-{top_n} momentum stocks below (equal weight).")
+    h = pd.DataFrame(res["holdings"])
+    if h.empty:
+        st.warning("No qualifying momentum stocks right now.")
+        return
+    show = h[["rank", "symbol", "name", "industry", "price", "ret_12m_pct",
+              "mom_score", "qty", "cost"]].rename(columns={
+        "rank": "#", "symbol": "SYMBOL", "name": "COMPANY", "industry": "SECTOR",
+        "price": "PRICE ₹", "ret_12m_pct": "12-MO RETURN %", "mom_score": "MOM SCORE",
+        "qty": "QTY", "cost": "COST ₹"})
+    st.dataframe(show.style.format({"PRICE ₹": "{:.1f}", "12-MO RETURN %": "{:+.0f}",
+                 "MOM SCORE": "{:.1f}", "COST ₹": "{:,.0f}"}),
+                 hide_index=True, use_container_width=True, height=min(620, 60 + 35 * len(show)))
+    st.caption(f"Deployed ₹{res['deployed']:,.0f} of ₹{capital:,.0f} across {len(h)} stocks "
+               f"· {res['candidates']} stocks qualified.")
+
+    st.markdown("**How to run it:**  Each month, **sell** stocks that have dropped off this list "
+                "and **buy** the new entrants (keep equal weight). If the regime flips to 🔴, sell "
+                "everything and hold cash.")
+    st.warning("⚠️ **Reality checks:** (1) Backtest excludes brokerage/STT/slippage — real returns "
+               "are lower. (2) For a small ₹10k account, holding 15 stocks is too fragmented "
+               "(odd lots + DP charges) — consider **fewer stocks (5–8)** or simply buying a "
+               "**Nifty 200 Momentum 30 ETF/index fund**, which *is* this strategy, diversified and "
+               "low-cost. (3) Momentum has occasional sharp 'crash' years; the cash regime helps but "
+               "doesn't eliminate risk. Past performance ≠ future. Not investment advice.")
+
+
+# ==========================================================================
 # BACKTEST VIEW (does the strategy actually work?)
 # ==========================================================================
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
@@ -629,11 +683,36 @@ def cached_backtest(scope, years, max_positions, max_hold, threshold, regime,
     return res
 
 
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def cached_mom_backtest(scope, years, top_n, regime_ma, _stamp):
+    bar = st.progress(0.0, text="Starting backtest…")
+    res = backtest.run_momentum_backtest(
+        scope=scope, years=years, capital=100000, top_n=top_n, regime_ma=regime_ma,
+        progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
+    bar.empty()
+    return res
+
+
 def render_backtest(scope, stamp):
     st.title("📉 Backtest — does the strategy actually work?")
-    st.caption("Replays the swing strategy over history with the real stop-loss/target "
-               "rules. **Technical signals only** (no news), and **excludes brokerage, "
+    st.caption("Replays a strategy over history with its real rules. **Excludes brokerage, "
                "taxes and slippage** — real results would be somewhat lower.")
+    strat = st.radio("Strategy", ["🚀 Momentum (recommended)", "Swing breakout"],
+                     horizontal=True)
+
+    if strat.startswith("🚀"):
+        c = st.columns(3)
+        years = c[0].slider("Years", 1, 4, 4)
+        top_n = c[1].slider("Stocks held", 5, 30, 15)
+        regime_ma = c[2].select_slider("Regime MA (go to cash below)", [50, 100, 200], value=50)
+        if not st.button("▶️ Run backtest", type="primary"):
+            st.info("Cross-sectional 12-1 momentum + cash when Nifty < its regime-MA, monthly "
+                    "rebalance. Click **Run backtest** (~1–2 min).")
+            return
+        res = cached_mom_backtest(scope, years, top_n, regime_ma, stamp)
+        _backtest_results(res, has_trades=False)
+        return
+
     c = st.columns(4)
     years = c[0].slider("Years", 1, 4, 2)
     max_positions = c[1].slider("Stocks held", 1, 10, 5)
@@ -652,6 +731,10 @@ def render_backtest(scope, stamp):
 
     res = cached_backtest(scope, years, max_positions, max_hold, threshold,
                           regime, above200, sl_mult, sl_max, stamp)
+    _backtest_results(res, has_trades=True)
+
+
+def _backtest_results(res, has_trades=True):
     if "error" in res or not res.get("metrics"):
         st.warning("Backtest returned no data — try again (data source may be busy).")
         return
@@ -662,7 +745,8 @@ def render_backtest(scope, stamp):
     a[0].metric("Strategy return", f"{m['total_return_pct']:+.1f}%",
                 f"{'beats' if beat else 'trails'} Nifty ({m['nifty_return_pct']:+.1f}%)")
     a[1].metric("CAGR", f"{m['cagr_pct']:+.1f}%/yr")
-    a[2].metric("Win rate", f"{m['win_rate_pct']:.0f}%", f"{m['num_trades']} trades")
+    a[2].metric("Win rate", f"{m['win_rate_pct']:.0f}%" if m["win_rate_pct"] is not None else "—",
+                f"{m['num_trades']} {'trades' if has_trades else 'rebalances'}")
     a[3].metric("Max drawdown", f"{m['max_drawdown_pct']:.1f}%", delta_color="inverse")
     b = st.columns(4)
     b[0].metric("Profit factor", f"{m['profit_factor']}" if m["profit_factor"] else "—")
@@ -674,12 +758,13 @@ def render_backtest(scope, stamp):
     chart = pd.DataFrame({"Strategy": res["equity"], "Buy & hold Nifty": res["benchmark"]})
     st.line_chart(chart)
 
-    if not beat or (m["profit_factor"] or 0) < 1.1:
-        st.warning("⚠️ This configuration is **marginal or worse than just holding the "
-                   "index** — and remember real costs would lower it further. Momentum "
-                   "strategies mainly work in trending markets.")
-    st.subheader("Trades")
-    if not res["trades"].empty:
+    if not beat:
+        st.warning("⚠️ This configuration **trails just holding the index** — and real costs "
+                   "would lower it further. Momentum strategies mainly work in trending markets.")
+    else:
+        st.success("✅ Beat the index in this period. Remember: excludes costs; past ≠ future.")
+    if has_trades and res.get("trades") is not None and not res["trades"].empty:
+        st.subheader("Trades")
         st.dataframe(res["trades"][::-1], hide_index=True, use_container_width=True, height=320)
 
 
@@ -687,8 +772,9 @@ def render_backtest(scope, stamp):
 # Sidebar + routing
 # ==========================================================================
 st.sidebar.title("📈 NSE Scanner")
-mode = st.sidebar.radio("Mode", ["Swing (15d – 2 months)", "🧪 Paper Trading",
-                                 "📉 Backtest", "Long-Term Investing", "Intraday Momentum"])
+mode = st.sidebar.radio("Mode", ["🚀 Momentum Portfolio", "Swing (15d – 2 months)",
+                                 "🧪 Paper Trading", "📉 Backtest", "Long-Term Investing",
+                                 "Intraday Momentum"])
 scope = st.sidebar.radio("Universe", ["nifty500", "all"],
                          format_func=lambda s: "Nifty 500" if s == "nifty500" else "All (~2,300)")
 with_news = st.sidebar.toggle("Apply News factor", value=True)
@@ -702,7 +788,11 @@ if st.sidebar.button("🔄 Refresh data", use_container_width=True):
 stamp = data_epoch()
 
 st.sidebar.markdown("---")
-if mode == "Long-Term Investing":
+if mode == "🚀 Momentum Portfolio":
+    st.sidebar.caption("Backtest-winning strategy: 12-1 cross-sectional momentum + go-to-cash "
+                       "when Nifty < 50-DMA. Monthly rebalance. ~30%/yr in backtest (excl. costs).")
+    render_momentum(scope, stamp)
+elif mode == "Long-Term Investing":
     st.sidebar.markdown("**Filters**")
     min_upside = st.sidebar.slider("Min upside %", -20, 60, 0, step=5)
     min_score = st.sidebar.slider("Min score", 0, 100, 0, step=5)
