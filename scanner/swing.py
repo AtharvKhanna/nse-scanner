@@ -122,13 +122,15 @@ def _recommendation(score, price, ema50):
 # Score one stock
 # --------------------------------------------------------------------------
 def evaluate(symbol, name, industry, ticker, daily, nifty_ret_3m=0.0,
-             news=None, apply_news=True) -> Optional[dict]:
+             news=None, apply_news=True, market_uptrend=True) -> Optional[dict]:
     if daily is None or len(daily) < 40:
         return None
     close = daily["Close"].dropna()
     price = float(close.iloc[-1])
     ema20 = indicators.ema(close, 20)
     ema50 = indicators.ema(close, 50)
+    sma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
+    above_200 = (sma200 is None) or price > sma200   # pass if not computable
     rsi = indicators.wilder_rsi(close)
     atr_pct = indicators.atr_pct(daily)
     atr_val = _atr_value(daily)
@@ -159,6 +161,12 @@ def evaluate(symbol, name, industry, ticker, daily, nifty_ret_3m=0.0,
     rr = upside_pct / downside_pct if downside_pct > 0 else None
 
     rec = _recommendation(score, price, ema50)
+    # BACKTEST-PROVEN FILTERS: don't BUY against the market or below the stock's 200-DMA.
+    blocked_reason = ""
+    if "BUY" in rec and config.SWING_REQUIRE_MARKET_UPTREND and not market_uptrend:
+        rec, blocked_reason = "🟡 WATCH (market weak)", "Nifty below 50-DMA"
+    elif "BUY" in rec and config.SWING_REQUIRE_ABOVE_200DMA and not above_200:
+        rec, blocked_reason = "🟡 WATCH (below 200-DMA)", "price below 200-DMA"
     # NEWS VETO: bad news (e.g. big loss, fraud, downgrade) blocks a Buy/Watch
     news_risk = bool(apply_news and news and news.get("red_flag"))
     flag_terms = (news or {}).get("flag_terms", []) if news_risk else []
@@ -181,6 +189,8 @@ def evaluate(symbol, name, industry, ticker, daily, nifty_ret_3m=0.0,
         "rs_3m_pct": round(rs_3m, 1) if rs_3m is not None else None,
         "rvol": round(rvol, 2) if not math.isnan(rvol) else None,
         "above_ema50": bool(ema50 and price > ema50),
+        "above_200dma": bool(above_200),
+        "blocked_reason": blocked_reason,
         "dist_52w_high_pct": round((high_52w - price) / high_52w * 100, 1) if high_52w else None,
         "news_points": news_points, "news_label": (news or {}).get("label", "—"),
     }
@@ -200,12 +210,16 @@ def run_swing_scan(scope="nifty500", with_news=True, news_limit=40,
     tickers = [u["ticker"] for u in uni]
     meta = {u["ticker"]: u for u in uni}
 
-    report(0.1, "Fetching Nifty 50 (relative strength benchmark)…")
+    report(0.1, "Fetching Nifty 50 (benchmark + market regime)…")
     nifty_ret_3m = 0.0
+    market_uptrend = True
     try:
         nidx = data.fetch_daily(["^NSEI"], config.SWING_HISTORY_DAYS).get("^NSEI")
         if nidx is not None and len(nidx) > 63:
-            nifty_ret_3m = _ret(nidx["Close"].dropna(), 63) or 0.0
+            nclose = nidx["Close"].dropna()
+            nifty_ret_3m = _ret(nclose, 63) or 0.0
+            ma50 = nclose.rolling(50).mean().iloc[-1]
+            market_uptrend = bool(nclose.iloc[-1] > ma50)   # regime gate
     except Exception:
         pass
 
@@ -218,7 +232,7 @@ def run_swing_scan(scope="nifty500", with_news=True, news_limit=40,
         m = meta.get(t, {})
         ev = evaluate(m.get("symbol", t.replace(".NS", "")), m.get("name", ""),
                       m.get("industry", ""), t, df, nifty_ret_3m,
-                      news=None, apply_news=False)
+                      news=None, apply_news=False, market_uptrend=market_uptrend)
         if ev:
             rows.append(ev)
 
@@ -237,7 +251,8 @@ def run_swing_scan(scope="nifty500", with_news=True, news_limit=40,
                 if not n:
                     continue
                 ev = evaluate(sym, df.at[i, "name"], df.at[i, "industry"], df.at[i, "ticker"],
-                              daily[df.at[i, "ticker"]], nifty_ret_3m, news=n, apply_news=True)
+                              daily[df.at[i, "ticker"]], nifty_ret_3m, news=n,
+                              apply_news=True, market_uptrend=market_uptrend)
                 if ev:
                     for k, v in ev.items():
                         df.at[i, k] = v
@@ -245,4 +260,5 @@ def run_swing_scan(scope="nifty500", with_news=True, news_limit=40,
         df.insert(0, "rank", range(1, len(df) + 1))
 
     report(1.0, "Done")
-    return {"df": df, "nifty_ret_3m": nifty_ret_3m, "news": news_map}
+    return {"df": df, "nifty_ret_3m": nifty_ret_3m, "news": news_map,
+            "market_uptrend": market_uptrend}

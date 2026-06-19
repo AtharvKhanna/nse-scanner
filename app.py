@@ -13,7 +13,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from scanner import config, scan, longterm, swing, paper
+from scanner import config, scan, longterm, swing, paper, backtest
 
 st.set_page_config(page_title="NSE Stock Scanner", page_icon="📈", layout="wide")
 
@@ -614,11 +614,81 @@ def render_paper(scope, with_news, news_limit, stamp):
 
 
 # ==========================================================================
+# BACKTEST VIEW (does the strategy actually work?)
+# ==========================================================================
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def cached_backtest(scope, years, max_positions, max_hold, threshold, regime,
+                    above200, sl_mult, sl_max, _stamp):
+    bar = st.progress(0.0, text="Starting backtest…")
+    res = backtest.run_backtest(
+        scope=scope, years=years, capital=100000, max_positions=max_positions,
+        max_hold_days=max_hold, score_threshold=threshold, regime_filter=regime,
+        stock_above_200dma=above200, sl_mult=sl_mult, sl_max=sl_max,
+        progress=lambda p, m: bar.progress(min(p, 1.0), text=m))
+    bar.empty()
+    return res
+
+
+def render_backtest(scope, stamp):
+    st.title("📉 Backtest — does the strategy actually work?")
+    st.caption("Replays the swing strategy over history with the real stop-loss/target "
+               "rules. **Technical signals only** (no news), and **excludes brokerage, "
+               "taxes and slippage** — real results would be somewhat lower.")
+    c = st.columns(4)
+    years = c[0].slider("Years", 1, 4, 2)
+    max_positions = c[1].slider("Stocks held", 1, 10, 5)
+    max_hold = c[2].slider("Max hold (days)", 15, 90, 60, step=5)
+    threshold = c[3].slider("Min score", 40, 90, 60, step=2)
+    c2 = st.columns(3)
+    regime = c2[0].toggle("Market regime filter (Nifty > 50-DMA)", value=True)
+    above200 = c2[1].toggle("Only stocks above their 200-DMA", value=True)
+    wider = c2[2].toggle("Wider stops (recommended)", value=True)
+    sl_mult, sl_max = (2.5, 14.0) if wider else (1.6, 9.0)
+
+    if not st.button("▶️ Run backtest", type="primary"):
+        st.info("Set your options and click **Run backtest**. Takes ~1–2 minutes "
+                "(downloads years of history for ~500 stocks).")
+        return
+
+    res = cached_backtest(scope, years, max_positions, max_hold, threshold,
+                          regime, above200, sl_mult, sl_max, stamp)
+    if "error" in res or not res.get("metrics"):
+        st.warning("Backtest returned no data — try again (data source may be busy).")
+        return
+    m = res["metrics"]
+
+    beat = (m["total_return_pct"] or 0) > (m["nifty_return_pct"] or 0)
+    a = st.columns(4)
+    a[0].metric("Strategy return", f"{m['total_return_pct']:+.1f}%",
+                f"{'beats' if beat else 'trails'} Nifty ({m['nifty_return_pct']:+.1f}%)")
+    a[1].metric("CAGR", f"{m['cagr_pct']:+.1f}%/yr")
+    a[2].metric("Win rate", f"{m['win_rate_pct']:.0f}%", f"{m['num_trades']} trades")
+    a[3].metric("Max drawdown", f"{m['max_drawdown_pct']:.1f}%", delta_color="inverse")
+    b = st.columns(4)
+    b[0].metric("Profit factor", f"{m['profit_factor']}" if m["profit_factor"] else "—")
+    b[1].metric("Avg win", f"{m['avg_win_pct']:+.1f}%" if m["avg_win_pct"] else "—")
+    b[2].metric("Avg loss", f"{m['avg_loss_pct']:+.1f}%" if m["avg_loss_pct"] else "—")
+    b[3].metric("Avg hold", f"{m['avg_hold_days']:.0f} days" if m["avg_hold_days"] else "—")
+    st.caption(f"Period {m['start']} → {m['end']} · ₹1,00,000 start → ₹{m['final_value']:,.0f} final.")
+
+    chart = pd.DataFrame({"Strategy": res["equity"], "Buy & hold Nifty": res["benchmark"]})
+    st.line_chart(chart)
+
+    if not beat or (m["profit_factor"] or 0) < 1.1:
+        st.warning("⚠️ This configuration is **marginal or worse than just holding the "
+                   "index** — and remember real costs would lower it further. Momentum "
+                   "strategies mainly work in trending markets.")
+    st.subheader("Trades")
+    if not res["trades"].empty:
+        st.dataframe(res["trades"][::-1], hide_index=True, use_container_width=True, height=320)
+
+
+# ==========================================================================
 # Sidebar + routing
 # ==========================================================================
 st.sidebar.title("📈 NSE Scanner")
 mode = st.sidebar.radio("Mode", ["Swing (15d – 2 months)", "🧪 Paper Trading",
-                                 "Long-Term Investing", "Intraday Momentum"])
+                                 "📉 Backtest", "Long-Term Investing", "Intraday Momentum"])
 scope = st.sidebar.radio("Universe", ["nifty500", "all"],
                          format_func=lambda s: "Nifty 500" if s == "nifty500" else "All (~2,300)")
 with_news = st.sidebar.toggle("Apply News factor", value=True)
@@ -656,6 +726,10 @@ elif mode == "🧪 Paper Trading":
     st.sidebar.caption("Virtual portfolio driven by the Swing signals. Buys the top "
                        "pick(s), auto-sells on stop-loss/target, tracks P&L. No real money.")
     render_paper(scope, with_news, news_limit, stamp)
+elif mode == "📉 Backtest":
+    st.sidebar.caption("Tests the swing strategy on historical data to see if it actually "
+                       "made money — win rate, returns, drawdown vs the Nifty.")
+    render_backtest(scope, stamp)
 else:
     st.sidebar.markdown("**Filters**")
     real_vwap = st.sidebar.toggle("Real intraday VWAP (shortlist)", value=True)

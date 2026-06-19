@@ -122,16 +122,22 @@ SWING_RSI_HIGH = 70
 SWING_RSI_OVERBOUGHT = 78
 SWING_VOL_FULL = 1.5       # RVol that earns full volume-confirmation marks
 
-# Target / stop sizing (ATR-based, tighter than long-term)
+# Target / stop sizing (ATR-based). Backtest showed wider stops sharply improve
+# results (win rate 33%->47%): tighter stops were getting whipsawed out.
 SWING_ATR_TARGET_MULT = 3.0   # target ≈ entry + N×ATR
-SWING_ATR_SL_MULT = 1.6       # stop  ≈ entry − N×ATR
+SWING_ATR_SL_MULT = 2.5       # stop  ≈ entry − N×ATR (was 1.6)
 SWING_TARGET_MIN_PCT = 4.0
 SWING_TARGET_MAX_PCT = 30.0
 SWING_SL_MIN_PCT = 3.0
-SWING_SL_MAX_PCT = 9.0
+SWING_SL_MAX_PCT = 14.0       # allow stops to breathe (was 9.0)
 SWING_DAYS_MIN = 10
 SWING_DAYS_MAX = 75           # ~2 months cap
-SWING_HISTORY_DAYS = 200      # ~9 months daily bars (3-mo return + 50-EMA + structure)
+SWING_HISTORY_DAYS = 320      # ~15 months daily bars (need 200 bars for the 200-DMA filter)
+
+# Backtest-proven filters: only take BUYs when the broad market is in an uptrend
+# (Nifty > its 50-DMA) AND the stock itself is above its 200-DMA.
+SWING_REQUIRE_MARKET_UPTREND = True
+SWING_REQUIRE_ABOVE_200DMA = True
 
 # Recommendation cut-offs (final 0-100 swing score)
 SWING_BUY = 60
