@@ -9,21 +9,18 @@ vs the Nifty's ~12%/yr. Honest caveats live in the UI.
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
 
 from . import config, data, indicators, universe
 
 
 def momentum_portfolio(scope="nifty500", top_n=None, lookback=None, skip=None,
-                       vol_adjust=None, regime_ma=None, capital=None) -> dict:
+                       vol_adjust=None, regime_ma=None) -> dict:
     top_n = top_n or config.MOM_TOP_N
     lookback = lookback or config.MOM_LOOKBACK
     skip = config.MOM_SKIP if skip is None else skip
     vol_adjust = config.MOM_VOL_ADJUST if vol_adjust is None else vol_adjust
     regime_ma = regime_ma or config.MOM_REGIME_MA
-    capital = capital or config.MOM_CAPITAL
 
     uni = universe.load_universe(scope)
     tickers = [u["ticker"] for u in uni]
@@ -77,26 +74,23 @@ def momentum_portfolio(scope="nifty500", top_n=None, lookback=None, skip=None,
             "atr_pct": round(atrp, 1),
         })
 
+    # Screener / ranking: sort all qualifying stocks by momentum score (best first).
     rows.sort(key=lambda r: r["mom_score"], reverse=True)
-    holdings = rows[:top_n] if in_market else []
-
-    # inverse-volatility ₹ allocation (risk parity — backtest-proven better than equal weight)
-    if holdings:
-        inv = {i: (1.0 / h["vol"] if h["vol"] == h["vol"] else 0.0)
-               for i, h in enumerate(holdings)}
-        tot = sum(inv.values()) or 1.0
-        for i, h in enumerate(holdings, 1):
-            weight = inv[i - 1] / tot
-            h["rank"] = i
-            h["weight_pct"] = round(weight * 100, 1)
-            h["qty"] = math.floor((weight * capital) / h["price"])
-            h["cost"] = round(h["qty"] * h["price"], 0)
+    for i, h in enumerate(rows, 1):
+        h["rank"] = i
+        if not in_market:
+            h["signal"] = "🔴 CASH (market weak)"
+        elif i <= top_n:
+            h["signal"] = "🟢 BUY"          # the strategy's top-N hold zone
+        elif i <= top_n * 2:
+            h["signal"] = "🟡 WATCH"        # next in line — promote on rebalance
+        else:
+            h["signal"] = "—"
 
     return {
         "in_market": in_market,
         "nifty": nifty, "nifty_ma": nifty_ma, "regime_ma": regime_ma,
-        "holdings": holdings,
-        "deployed": round(sum(h["cost"] for h in holdings), 0) if holdings else 0,
-        "capital": capital,
+        "top_n": top_n,
+        "ranked": rows[:max(top_n * 4, 60)],   # screening list
         "candidates": len(rows),
     }

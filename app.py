@@ -84,9 +84,9 @@ def cached_longterm(scope, with_news, news_limit, _stamp):
     return res
 
 
-@st.cache_data(ttl=config.DAILY_TTL, show_spinner="Computing momentum portfolio…")
-def cached_momentum(scope, top_n, capital, _stamp):
-    return momentum.momentum_portfolio(scope, top_n=top_n, capital=capital)
+@st.cache_data(ttl=config.DAILY_TTL, show_spinner="Ranking momentum stocks…")
+def cached_momentum(scope, top_n, _stamp):
+    return momentum.momentum_portfolio(scope, top_n=top_n)
 
 
 @st.cache_data(ttl=config.DAILY_TTL, show_spinner=False)
@@ -627,10 +627,10 @@ def render_paper(scope, with_news, news_limit, stamp):
 # MOMENTUM PORTFOLIO VIEW (the backtest-winning strategy)
 # ==========================================================================
 def render_momentum(scope, stamp):
-    st.title("🚀 Momentum Portfolio — the backtest-winning strategy")
-    st.caption("Cross-sectional 12-1 momentum (Jegadeesh-Titman / Nifty Momentum-30 style), "
-               "inverse-volatility weighted + go-to-cash when the Nifty is below its 50-DMA. "
-               "**Rebalance ~monthly.** Backtest (4y, **after ~0.3% costs**): ~**27%/yr**, "
+    st.title("🚀 Momentum Ranking — the backtest-winning strategy")
+    st.caption("Nifty 500 ranked by **12-1 cross-sectional momentum** (Jegadeesh-Titman / Nifty "
+               "Momentum-30 style, volatility-adjusted). Top-N = BUY; the strategy holds cash when "
+               "the Nifty is below its 50-DMA. Backtest (4y, after ~0.3% costs): ~**27%/yr**, "
                "−13% max drawdown, vs Nifty ~12%/yr.")
     with st.expander("📊 Why this strategy? (research + backtest)"):
         st.markdown(
@@ -646,55 +646,59 @@ def render_momentum(scope, stamp):
             "Tested-and-rejected (didn't help / hurt): residual momentum, low-vol tilt, sector "
             "caps, concentration. **Caveat:** backtest ≠ future; momentum has occasional crash "
             "years. Not investment advice.")
-    c = st.columns([1, 1, 2])
-    top_n = c[0].number_input("Stocks to hold", 5, 30, getattr(config, "MOM_TOP_N", 15))
-    capital = c[1].number_input("Capital (₹)", 5000, 10_000_000,
-                                getattr(config, "MOM_CAPITAL", 10000), step=5000)
+    c = st.columns([1, 3])
+    top_n = c[0].number_input("Top-N = BUY", 5, 30, getattr(config, "MOM_TOP_N", 15))
+    res = cached_momentum(scope, top_n, stamp)
 
-    res = cached_momentum(scope, top_n, capital, stamp)
-
+    # regime banner
     if not res["in_market"]:
-        st.error(f"🔴 **OUT OF MARKET — hold CASH.** The Nifty ({res['nifty']:.0f}) is **below "
-                 f"its {res['regime_ma']}-DMA** ({res['nifty_ma']:.0f}), signalling market weakness. "
-                 "The strategy stays in cash until the Nifty reclaims its 50-DMA — this is what "
-                 "protects you from drawdowns. **Don't buy momentum stocks now.**")
-        return
+        st.error(f"🔴 **MARKET WEAK — strategy is in CASH.** Nifty ({res['nifty']:.0f}) is **below "
+                 f"its {res['regime_ma']}-DMA** ({res['nifty_ma']:.0f}). The momentum strategy holds "
+                 "cash until the Nifty reclaims its 50-DMA. Ranking shown below for reference only — "
+                 "**no BUYs while the market is weak.**")
+    else:
+        st.success(f"🟢 **MARKET OK.** Nifty ({res['nifty']:.0f}) is above its {res['regime_ma']}-DMA "
+                   f"({res['nifty_ma']:.0f}). Top-{top_n} ranked stocks are 🟢 BUY.")
 
-    st.success(f"🟢 **IN MARKET.** Nifty ({res['nifty']:.0f}) is above its {res['regime_ma']}-DMA "
-               f"({res['nifty_ma']:.0f}) → hold the top-{top_n} momentum stocks below (equal weight).")
-    h = pd.DataFrame(res["holdings"])
-    if h.empty:
+    ranked = pd.DataFrame(res["ranked"])
+    if ranked.empty:
         st.warning("No qualifying momentum stocks right now.")
         return
-    cols = ["rank", "symbol", "name", "industry", "price", "target", "stop_loss",
-            "ret_12m_pct", "mom_score"]
-    cols += [c for c in ["weight_pct", "qty", "cost"] if c in h.columns]
-    cols = [c for c in cols if c in h.columns]
-    show = h[cols].rename(columns={
-        "rank": "#", "symbol": "SYMBOL", "name": "COMPANY", "industry": "SECTOR",
-        "price": "BUY ₹", "target": "TARGET ₹", "stop_loss": "STOP ₹",
-        "ret_12m_pct": "12-MO RETURN %", "mom_score": "MOM SCORE",
-        "weight_pct": "WEIGHT %", "qty": "QTY", "cost": "COST ₹"})
-    st.dataframe(show.style.format({"BUY ₹": "{:.1f}", "TARGET ₹": "{:.1f}", "STOP ₹": "{:.1f}",
-                 "12-MO RETURN %": "{:+.0f}", "MOM SCORE": "{:.1f}", "WEIGHT %": "{:.1f}",
-                 "COST ₹": "{:,.0f}"}),
-                 hide_index=True, use_container_width=True, height=min(620, 60 + 35 * len(show)))
-    st.caption(f"Deployed ₹{res['deployed']:,.0f} of ₹{capital:,.0f} across {len(h)} stocks "
-               f"· {res['candidates']} stocks qualified.")
-    st.caption("**Note:** Momentum's main exit is the **monthly rebalance** (sell what drops off "
-               "the list) or 🔴 regime flip. The **STOP ₹** is an ATR-based protective stop you can "
-               "place as a GTT; the **TARGET ₹** is a reference level (momentum usually rides the "
-               "trend rather than exiting at a fixed target).")
 
-    st.markdown("**How to run it:**  Each month, **sell** stocks that have dropped off this list "
-                "and **buy** the new entrants (keep equal weight). If the regime flips to 🔴, sell "
-                "everything and hold cash.")
-    st.warning("⚠️ **Reality checks:** (1) Backtest excludes brokerage/STT/slippage — real returns "
-               "are lower. (2) For a small ₹10k account, holding 15 stocks is too fragmented "
-               "(odd lots + DP charges) — consider **fewer stocks (5–8)** or simply buying a "
-               "**Nifty 200 Momentum 30 ETF/index fund**, which *is* this strategy, diversified and "
-               "low-cost. (3) Momentum has occasional sharp 'crash' years; the cash regime helps but "
-               "doesn't eliminate risk. Past performance ≠ future. Not investment advice.")
+    buys = (ranked["signal"] == "🟢 BUY").sum()
+    m = st.columns(3)
+    m[0].metric("🟢 Buy-ranked", int(buys))
+    m[1].metric("Qualified stocks", res["candidates"])
+    m[2].metric("Market regime", "IN" if res["in_market"] else "CASH")
+
+    tab1, tab2 = st.tabs(["🟢 Top picks (BUY)", "📊 Full ranking"])
+    table_cols = ["rank", "symbol", "name", "industry", "price", "target", "stop_loss",
+                  "ret_12m_pct", "mom_score", "signal"]
+    rename = {"rank": "#", "symbol": "SYMBOL", "name": "COMPANY", "industry": "SECTOR",
+              "price": "PRICE ₹", "target": "TARGET ₹", "stop_loss": "STOP ₹",
+              "ret_12m_pct": "12-MO %", "mom_score": "MOM SCORE", "signal": "SIGNAL"}
+    fmt = {"PRICE ₹": "{:.1f}", "TARGET ₹": "{:.1f}", "STOP ₹": "{:.1f}",
+           "12-MO %": "{:+.0f}", "MOM SCORE": "{:.1f}"}
+
+    def _tbl(df):
+        d = df[[c for c in table_cols if c in df.columns]].rename(columns=rename)
+        return d.style.format(fmt, na_rep="—")
+
+    with tab1:
+        st.caption(f"The strategy's hold list — top {top_n} by momentum score (ranked).")
+        st.dataframe(_tbl(ranked[ranked["signal"] == "🟢 BUY"]), hide_index=True,
+                     use_container_width=True, height=min(620, 60 + 35 * max(buys, 1)))
+    with tab2:
+        st.caption("All qualifying stocks ranked by momentum score (12-1, vol-adjusted). "
+                   "🟢 BUY = top-N hold zone · 🟡 WATCH = next in line.")
+        st.dataframe(_tbl(ranked), hide_index=True, use_container_width=True, height=650)
+        st.download_button("⬇️ Download CSV", ranked.to_csv(index=False).encode("utf-8"),
+                           file_name=f"nse_momentum_{stamp[:10]}.csv", mime="text/csv")
+
+    st.caption("Ranked by 12-1 cross-sectional momentum. **STOP ₹** = ATR-based protective stop "
+               "(place as a GTT); **TARGET ₹** = reference level. Momentum's real exit is the "
+               "monthly rebalance (sell what drops out of the top-N) or a 🔴 regime flip. "
+               "Backtest ≠ future; not investment advice.")
 
 
 # ==========================================================================
@@ -810,7 +814,7 @@ def _backtest_results(res, has_trades=True):
 # Sidebar + routing
 # ==========================================================================
 st.sidebar.title("📈 NSE Scanner")
-mode = st.sidebar.radio("Mode", ["🚀 Momentum Portfolio", "Swing (15d – 2 months)",
+mode = st.sidebar.radio("Mode", ["🚀 Momentum Ranking", "Swing (15d – 2 months)",
                                  "🧪 Paper Trading", "📉 Backtest", "Long-Term Investing",
                                  "Intraday Momentum"])
 scope = st.sidebar.radio("Universe", ["nifty500", "all"],
@@ -826,7 +830,7 @@ if st.sidebar.button("🔄 Refresh data", use_container_width=True):
 stamp = data_epoch()
 
 st.sidebar.markdown("---")
-if mode == "🚀 Momentum Portfolio":
+if mode == "🚀 Momentum Ranking":
     st.sidebar.caption("Backtest-winning strategy: 12-1 cross-sectional momentum + go-to-cash "
                        "when Nifty < 50-DMA. Monthly rebalance. ~30%/yr in backtest (excl. costs).")
     render_momentum(scope, stamp)
