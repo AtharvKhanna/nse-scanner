@@ -665,9 +665,9 @@ def render_momentum(scope, stamp):
         st.warning("No qualifying momentum stocks right now.")
         return
 
-    buys = (ranked["signal"] == "🟢 BUY").sum()
+    buys = int((ranked["signal"] == "🟢 BUY").sum())
     m = st.columns(3)
-    m[0].metric("🟢 Buy-ranked", int(buys))
+    m[0].metric("🟢 Buy-ranked", buys)
     m[1].metric("Qualified stocks", res["candidates"])
     m[2].metric("Market regime", "IN" if res["in_market"] else "CASH")
 
