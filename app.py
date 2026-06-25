@@ -86,7 +86,9 @@ def cached_longterm(scope, with_news, news_limit, _stamp):
 
 @st.cache_data(ttl=config.DAILY_TTL, show_spinner="Ranking momentum stocks…")
 def cached_momentum(scope, top_n, _stamp):
-    return momentum.momentum_portfolio(scope, top_n=top_n)
+    res = momentum.momentum_portfolio(scope, top_n=top_n)
+    res["fetched_at"] = _ist_now_str()
+    return res
 
 
 @st.cache_data(ttl=config.DAILY_TTL, show_spinner=False)
@@ -670,6 +672,7 @@ def render_momentum(scope, stamp):
     m[0].metric("🟢 Buy-ranked", buys)
     m[1].metric("Qualified stocks", res["candidates"])
     m[2].metric("Market regime", "IN" if res["in_market"] else "CASH")
+    _updated_caption(res)
 
     tab1, tab2 = st.tabs(["🟢 Top picks (BUY)", "📊 Full ranking"])
     table_cols = ["rank", "symbol", "name", "industry", "price", "target", "stop_loss",
