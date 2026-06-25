@@ -666,17 +666,25 @@ def render_momentum(scope, stamp):
     if h.empty:
         st.warning("No qualifying momentum stocks right now.")
         return
-    cols = ["rank", "symbol", "name", "industry", "price", "ret_12m_pct", "mom_score"]
+    cols = ["rank", "symbol", "name", "industry", "price", "target", "stop_loss",
+            "ret_12m_pct", "mom_score"]
     cols += [c for c in ["weight_pct", "qty", "cost"] if c in h.columns]
+    cols = [c for c in cols if c in h.columns]
     show = h[cols].rename(columns={
         "rank": "#", "symbol": "SYMBOL", "name": "COMPANY", "industry": "SECTOR",
-        "price": "PRICE ₹", "ret_12m_pct": "12-MO RETURN %", "mom_score": "MOM SCORE",
+        "price": "BUY ₹", "target": "TARGET ₹", "stop_loss": "STOP ₹",
+        "ret_12m_pct": "12-MO RETURN %", "mom_score": "MOM SCORE",
         "weight_pct": "WEIGHT %", "qty": "QTY", "cost": "COST ₹"})
-    st.dataframe(show.style.format({"PRICE ₹": "{:.1f}", "12-MO RETURN %": "{:+.0f}",
-                 "MOM SCORE": "{:.1f}", "WEIGHT %": "{:.1f}", "COST ₹": "{:,.0f}"}),
+    st.dataframe(show.style.format({"BUY ₹": "{:.1f}", "TARGET ₹": "{:.1f}", "STOP ₹": "{:.1f}",
+                 "12-MO RETURN %": "{:+.0f}", "MOM SCORE": "{:.1f}", "WEIGHT %": "{:.1f}",
+                 "COST ₹": "{:,.0f}"}),
                  hide_index=True, use_container_width=True, height=min(620, 60 + 35 * len(show)))
     st.caption(f"Deployed ₹{res['deployed']:,.0f} of ₹{capital:,.0f} across {len(h)} stocks "
                f"· {res['candidates']} stocks qualified.")
+    st.caption("**Note:** Momentum's main exit is the **monthly rebalance** (sell what drops off "
+               "the list) or 🔴 regime flip. The **STOP ₹** is an ATR-based protective stop you can "
+               "place as a GTT; the **TARGET ₹** is a reference level (momentum usually rides the "
+               "trend rather than exiting at a fixed target).")
 
     st.markdown("**How to run it:**  Each month, **sell** stocks that have dropped off this list "
                 "and **buy** the new entrants (keep equal weight). If the regime flips to 🔴, sell "

@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from . import config, data, universe
+from . import config, data, indicators, universe
 
 
 def momentum_portfolio(scope="nifty500", top_n=None, lookback=None, skip=None,
@@ -57,6 +57,11 @@ def momentum_portfolio(scope="nifty500", top_n=None, lookback=None, skip=None,
         ret_12m = c.iloc[-1] / c.iloc[-1 - lookback] - 1
         if mom <= 0 or not above_200:                                # absolute-momentum + trend gate
             continue
+        # ATR-based protective stop + reference target (wider, since holds are longer)
+        atrp = indicators.atr_pct(df)
+        atrp = atrp if atrp == atrp else 4.0
+        sl_pct = min(max(2.5 * atrp, 6.0), 18.0)
+        tp_pct = min(max(3.0 * atrp, 10.0), 40.0)
         m = meta.get(t, {})
         rows.append({
             "symbol": m.get("symbol", t.replace(".NS", "")),
@@ -66,6 +71,10 @@ def momentum_portfolio(scope="nifty500", top_n=None, lookback=None, skip=None,
             "ret_12m_pct": round(ret_12m * 100, 1),
             "vol": float(vol) if vol and vol > 0 else float("nan"),
             "above_200dma": bool(above_200),
+            "stop_loss": round(price * (1 - sl_pct / 100), 2),
+            "target": round(price * (1 + tp_pct / 100), 2),
+            "downside_pct": round(sl_pct, 1), "upside_pct": round(tp_pct, 1),
+            "atr_pct": round(atrp, 1),
         })
 
     rows.sort(key=lambda r: r["mom_score"], reverse=True)
